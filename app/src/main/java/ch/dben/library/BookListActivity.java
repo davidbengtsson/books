@@ -6,18 +6,23 @@ import android.os.Bundle;
 import android.support.annotation.NonNull;
 import android.support.v7.app.AppCompatActivity;
 import android.support.v7.widget.RecyclerView;
+import android.support.v7.widget.SearchView;
 import android.support.v7.widget.Toolbar;
-import android.support.design.widget.FloatingActionButton;
-import android.support.design.widget.Snackbar;
+import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
+import android.widget.ImageView;
 import android.widget.TextView;
 
+import com.google.api.services.books.model.Volume;
 
-import ch.dben.library.dummy.DummyContent;
-
+import java.util.LinkedList;
 import java.util.List;
+
+import ch.dben.library.content.BooksSearchAsyncTask;
+import ch.dben.library.content.ImageDownloadAsyncTask;
+import ch.dben.library.content.SearchResult;
 
 /**
  * An activity representing a list of Books. This activity
@@ -29,11 +34,13 @@ import java.util.List;
  */
 public class BookListActivity extends AppCompatActivity {
 
+    private static final String TAG = BookListActivity.class.getSimpleName();
     /**
      * Whether or not the activity is in two-pane mode, i.e. running on a tablet
      * device.
      */
     private boolean mTwoPane;
+    private SimpleItemRecyclerViewAdapter adapter;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -44,12 +51,25 @@ public class BookListActivity extends AppCompatActivity {
         setSupportActionBar(toolbar);
         toolbar.setTitle(getTitle());
 
-        FloatingActionButton fab = (FloatingActionButton) findViewById(R.id.fab);
-        fab.setOnClickListener(new View.OnClickListener() {
+        final SearchView searchView = (SearchView) findViewById(R.id.search);
+        searchView.setOnQueryTextListener(new SearchView.OnQueryTextListener() {
             @Override
-            public void onClick(View view) {
-                Snackbar.make(view, "Replace with your own action", Snackbar.LENGTH_LONG)
-                        .setAction("Action", null).show();
+            public boolean onQueryTextSubmit(String query) {
+                Log.d(TAG, "Searching for: " + query);
+
+                new BooksSearchAsyncTask(query) {
+                    @Override
+                    protected void onPostExecute(Void v) {
+                        adapter.setBooks(SearchResult.getCurrent());
+                    }
+                }.execute();
+
+                return true;
+            }
+
+            @Override
+            public boolean onQueryTextChange(String newText) {
+                return false;
             }
         });
 
@@ -67,16 +87,21 @@ public class BookListActivity extends AppCompatActivity {
     }
 
     private void setupRecyclerView(@NonNull RecyclerView recyclerView) {
-        recyclerView.setAdapter(new SimpleItemRecyclerViewAdapter(DummyContent.ITEMS));
+        adapter = new SimpleItemRecyclerViewAdapter();
+        recyclerView.setAdapter(adapter);
     }
 
     public class SimpleItemRecyclerViewAdapter
             extends RecyclerView.Adapter<SimpleItemRecyclerViewAdapter.ViewHolder> {
 
-        private final List<DummyContent.DummyItem> mValues;
+        private List<Volume> mValues = new LinkedList<>();
 
-        public SimpleItemRecyclerViewAdapter(List<DummyContent.DummyItem> items) {
-            mValues = items;
+        public SimpleItemRecyclerViewAdapter() {
+        }
+
+        void setBooks(List<Volume> books) {
+            mValues  = books;
+            notifyDataSetChanged();
         }
 
         @Override
@@ -89,15 +114,21 @@ public class BookListActivity extends AppCompatActivity {
         @Override
         public void onBindViewHolder(final ViewHolder holder, int position) {
             holder.mItem = mValues.get(position);
-            holder.mIdView.setText(mValues.get(position).id);
-            holder.mContentView.setText(mValues.get(position).content);
+            holder.mTitleView.setText(mValues.get(position).getVolumeInfo().getTitle());
+            holder.mContentView.setText(mValues.get(position).getVolumeInfo().getPublishedDate());
+
+            try {
+                new ImageDownloadAsyncTask(holder.mThumbnail, holder.mItem.getVolumeInfo().getImageLinks().getThumbnail()).execute();
+            } catch (NullPointerException e) {
+                holder.mThumbnail.setImageResource(android.R.drawable.stat_notify_error);
+            }
 
             holder.mView.setOnClickListener(new View.OnClickListener() {
                 @Override
                 public void onClick(View v) {
                     if (mTwoPane) {
                         Bundle arguments = new Bundle();
-                        arguments.putString(BookDetailFragment.ARG_ITEM_ID, holder.mItem.id);
+                        arguments.putString(BookDetailFragment.ARG_ITEM_ID, holder.mItem.getId());
                         BookDetailFragment fragment = new BookDetailFragment();
                         fragment.setArguments(arguments);
                         getSupportFragmentManager().beginTransaction()
@@ -106,7 +137,7 @@ public class BookListActivity extends AppCompatActivity {
                     } else {
                         Context context = v.getContext();
                         Intent intent = new Intent(context, BookDetailActivity.class);
-                        intent.putExtra(BookDetailFragment.ARG_ITEM_ID, holder.mItem.id);
+                        intent.putExtra(BookDetailFragment.ARG_ITEM_ID, holder.mItem.getId());
 
                         context.startActivity(intent);
                     }
@@ -121,20 +152,17 @@ public class BookListActivity extends AppCompatActivity {
 
         public class ViewHolder extends RecyclerView.ViewHolder {
             public final View mView;
-            public final TextView mIdView;
+            public final TextView mTitleView;
             public final TextView mContentView;
-            public DummyContent.DummyItem mItem;
+            public final ImageView mThumbnail;
+            public Volume mItem;
 
             public ViewHolder(View view) {
                 super(view);
                 mView = view;
-                mIdView = (TextView) view.findViewById(R.id.id);
+                mTitleView = (TextView) view.findViewById(R.id.title);
                 mContentView = (TextView) view.findViewById(R.id.content);
-            }
-
-            @Override
-            public String toString() {
-                return super.toString() + " '" + mContentView.getText() + "'";
+                mThumbnail = (ImageView) view.findViewById(R.id.thumbImage);
             }
         }
     }
